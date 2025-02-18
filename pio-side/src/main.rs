@@ -4,6 +4,10 @@
 #![no_main]
 #![allow(static_mut_refs)]
 
+mod usb_pio;
+
+use usb_pio::UsbPio;
+
 // The macro for our start-up function
 use rp_pico::entry;
 
@@ -36,6 +40,8 @@ static mut USB_DEVICE: Option<UsbDevice<hal::usb::UsbBus>> = None;
 
 /// The USB Bus Driver (shared with the interrupt).
 static mut USB_BUS: Option<UsbBusAllocator<hal::usb::UsbBus>> = None;
+
+static mut USB_PIO: Option<UsbPio<hal::usb::UsbBus>> = None;
 
 /// Entry point to our bare-metal application.
 ///
@@ -85,6 +91,13 @@ fn main() -> ! {
     // compiler not to take mutable access to this global variable whilst this
     // reference exists!
     let bus_ref = unsafe { USB_BUS.as_ref().unwrap() };
+
+    const USB_FS_MAX_BULK_SIZE: u16 = 64;
+    let usb_pio = UsbPio::new(bus_ref, USB_FS_MAX_BULK_SIZE);
+    unsafe {
+        // Note (safety): This is safe as interrupts haven't been started yet
+        USB_PIO = Some(usb_pio);
+    }
 
     // Create a USB device with a fake VID and PID
     let usb_dev = UsbDeviceBuilder::new(bus_ref, UsbVidPid(0x16c0, 0x27dd))
@@ -145,9 +158,10 @@ fn main() -> ! {
 unsafe fn USBCTRL_IRQ() {
     // Grab the global objects. This is OK as we only access them under interrupt.
     let usb_dev = USB_DEVICE.as_mut().unwrap();
+    let usb_pio = USB_PIO.as_mut().unwrap();
 
     // Poll the USB driver with all of our supported USB Classes
-    if usb_dev.poll(&mut []) {}
+    if usb_dev.poll(&mut [usb_pio]) {}
 }
 
 // End of file
